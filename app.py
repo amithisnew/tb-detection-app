@@ -30,9 +30,9 @@ def build_bnn():
 @st.cache_resource
 def load_models():
     cbm_model = build_cbm_inference()
-    cbm_model.load_weights("/content/drive/MyDrive/TB_Detection_Project/models/final_model.weights.h5")
+    cbm_model.load_weights("models/final_model.weights.h5")
     bnn_model = build_bnn()
-    bnn_model.load_weights("/content/drive/MyDrive/TB_Detection_Project/models/bnn_model.weights.h5")
+    bnn_model.load_weights("models/bnn_model.weights.h5")
     return cbm_model, bnn_model
 
 cbm_model, bnn_model = load_models()
