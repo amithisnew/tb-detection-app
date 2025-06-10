@@ -1,0 +1,1 @@
+echo -e "streamlit==1.38.0\ntensorflow==2.15.0\npillow==10.4.0\nnumpy==1.26.4" > requirements.txt
