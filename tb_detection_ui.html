@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+   <html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+       <title>TB Detection UI</title>
+       <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js"></script>
+       <style>
+           body {
+               font-family: Arial, sans-serif;
+               max-width: 800px;
+               margin: 0 auto;
+               padding: 20px;
+               background-color: #f4f4f4;
+           }
+           h1 {
+               text-align: center;
+               color: #333;
+           }
+           #upload-container {
+               text-align: center;
+               margin-bottom: 20px;
+           }
+           #image-preview {
+               max-width: 224px;
+               max-height: 224px;
+               display: block;
+               margin: 10px auto;
+               border: 2px solid #ccc;
+           }
+           #results {
+               background-color: white;
+               padding: 20px;
+               border-radius: 8px;
+               box-shadow: 0 0 10px rgba(0,0,0,0.1);
+           }
+           table {
+               width: 100%;
+               border-collapse: collapse;
+               margin-bottom: 20px;
+           }
+           th, td {
+               border: 1px solid #ddd;
+               padding: 8px;
+               text-align: left;
+           }
+           th {
+               background-color: #f2f2f2;
+           }
+           #tb-prediction {
+               font-size: 1.2em;
+               font-weight: bold;
+               text-align: center;
+           }
+           button {
+               background-color: #4CAF50;
+               color: white;
+               padding: 10px 20px;
+               border: none;
+               border-radius: 4px;
+               cursor: pointer;
+           }
+           button:hover {
+               background-color: #45a049;
+           }
+       </style>
+   </head>
+   <body>
+       <h1>TB Detection System</h1>
+       <div id="upload-container">
+           <input type="file" id="image-upload" accept="image/jpeg,image/png">
+           <button onclick="predict()">Predict</button>
+           <img id="image-preview" src="" alt="Uploaded Image">
+       </div>
+       <div id="results">
+           <h2>Concept Predictions</h2>
+           <table>
+               <thead>
+                   <tr>
+                       <th>Concept</th>
+                       <th>Probability</th>
+                   </tr>
+               </thead>
+               <tbody id="concept-table">
+               </tbody>
+           </table>
+           <h2>TB Prediction</h2>
+           <div id="tb-prediction"></div>
+       </div>
+
+       <script>
+           let cbmModel = null, bnnModel = null;
+
+           // Load models with individual error handling
+           async function loadModels() {
+               try {
+                   console.log('Loading CBM model...');
+                   cbmModel = await tf.loadLayersModel('http://localhost:8005/models/tfjs_models/cbm/model.json');
+                   console.log('CBM model loaded successfully');
+               } catch (error) {
+                   console.error('Error loading CBM model:', error);
+                   alert('Failed to load CBM model. Check console for details.');
+                   return false;
+               }
+               try {
+                   console.log('Loading BNN model...');
+                   bnnModel = await tf.loadLayersModel('http://localhost:8005/models/tfjs_models/bnn/model.json');
+                   console.log('BNN model loaded successfully');
+               } catch (error) {
+                   console.error('Error loading BNN model:', error);
+                   alert('Failed to load BNN model. Check console for details.');
+                   return false;
+               }
+               console.log('Both models loaded successfully');
+               return true;
+           }
+
+           // Preprocess image
+           function preprocessImage(image) {
+               console.log('Preprocessing image...');
+               let tensor = tf.browser.fromPixels(image, 1) // Grayscale
+                   .resizeNearestNeighbor([224, 224])
+                   .toFloat();
+               const min = tensor.min();
+               const max = tensor.max();
+               tensor = tensor.sub(min).div(max.sub(min).add(1e-7));
+               tensor = tensor.expandDims(-1).tile([1, 1, 1, 3]);
+               tensor = tensor.expandDims(0);
+               console.log('Image preprocessed, shape:', tensor.shape);
+               return tensor;
+           }
+
+           // Update UI
+           function updateUI(conceptProbs, tbProb) {
+               console.log('Updating UI with predictions...');
+               const concepts = ['Effusion', 'Consolidation', 'Edema', 'Atelectasis', 'Lung Opacity'];
+               const tableBody = document.getElementById('concept-table');
+               tableBody.innerHTML = '';
+               conceptProbs.forEach((prob, i) => {
+                   const row = document.createElement('tr');
+                   row.innerHTML = `<td>${concepts[i]}</td><td>${(prob * 100).toFixed(2)}%</td>`;
+                   tableBody.appendChild(row);
+               });
+               const tbPrediction = document.getElementById('tb-prediction');
+               const tbLabel = tbProb >= 0.5 ? 'TB_Positive' : 'TB_Negative';
+               tbPrediction.innerHTML = `TB Prediction: ${tbLabel} (Probability: ${(tbProb * 100).toFixed(2)}%)`;
+           }
+
+           // Predict
+           async function predict() {
+               console.log('Starting prediction...');
+               const input = document.getElementById('image-upload');
+               if (!input.files[0]) {
+                   alert('Please upload an image.');
+                   return;
+               }
+               const image = new Image();
+               image.src = URL.createObjectURL(input.files[0]);
+               document.getElementById('image-preview').src = image.src;
+               image.onload = async () => {
+                   try {
+                       if (!cbmModel || !bnnModel) {
+                           throw new Error('Models not loaded. Please refresh and try again.');
+                       }
+                       const tensor = preprocessImage(image);
+                       console.log('Running CBM prediction...');
+                       const conceptPreds = await cbmModel.predict(tensor);
+                       console.log('CBM predictions:', conceptPreds);
+                       const conceptProbs = conceptPreds.dataSync();
+                       console.log('CBM probabilities:', conceptProbs);
+                       const conceptTensor = tf.tensor2d([conceptProbs], [1, 5]);
+                       console.log('Running BNN prediction...');
+                       const tbPred = await bnnModel.predict(conceptTensor);
+                       const tbProb = tbPred.dataSync()[0];
+                       console.log('BNN prediction:', tbProb);
+                       updateUI(conceptProbs, tbProb);
+                       tensor.dispose();
+                       conceptPreds.dispose();
+                       conceptTensor.dispose();
+                       tbPred.dispose();
+                   } catch (error) {
+                       console.error('Prediction error:', error);
+                       alert('Prediction failed. Check console for details.');
+                   }
+               };
+           }
+
+           // Initialize
+           window.onload = async () => {
+               console.log('Initializing UI...');
+               const modelsLoaded = await loadModels();
+               if (!modelsLoaded) {
+                   console.error('Model loading failed. UI initialization aborted.');
+                   return;
+               }
+               document.getElementById('image-upload').addEventListener('change', (e) => {
+                   if (e.target.files[0]) {
+                       document.getElementById('image-preview').src = URL.createObjectURL(e.target.files[0]);
+                   }
+               });
+           };
+       </script>
+   </body>
+   </html>
